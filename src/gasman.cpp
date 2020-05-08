@@ -6,6 +6,8 @@
 #include "rfm95_config.h"
 #include "NodeTypes.h"
 
+// CCS811 Air Quality Sensor
+#include "Adafruit_CCS811.h"
 
 const uint8_t g_lora_address = 213;
 
@@ -34,7 +36,14 @@ kinski::Timer g_timer[NUM_TIMERS];
 constexpr uint8_t g_battery_pin = BATTERY_PIN;
 uint8_t g_battery_val = 0;
 
-// TODO: sensor device here
+// CCS811 Air Quality Sensor
+Adafruit_CCS811 g_ccs_sensor;
+
+// eCO2 (equivalent calculated carbon-dioxide) concentration in range [400 .. 8192] parts per million (ppm)
+int g_eco2;
+
+// TVOC (total volatile organic compound) concentration in range [0 .. 1187] parts per billion (ppb)
+int g_tvoc;
 
 // last measurements
 float g_temperature;
@@ -51,6 +60,8 @@ float g_humidity;
 void parse_line(char *the_line);
 
 template <typename T> void process_input(T& the_device);
+
+void blink_status_led();
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -77,7 +88,11 @@ void set_address(uint8_t address)
         Serial.print("LoRa radio init complete -> now listening on adress: 0x");
         Serial.println(g_lora_config.address, HEX);
     }
-    else{ Serial.println("LoRa radio init failed"); }
+    else
+    {
+       Serial.println("LoRa radio init failed");
+       while(true){ blink_status_led(); }
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -95,30 +110,28 @@ void lora_receive()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-bool lora_send_status()
+template<typename T> bool lora_send_status(const T &data)
 {
-    bool ret = false;
-    constexpr size_t num_bytes = sizeof(weather_t) + 1;
+    // data + checksum
+    constexpr size_t num_bytes = sizeof(T) + 1;
 
-    uint8_t data[num_bytes];
-
-    weather_t &weather = *(weather_t*)data;
-    weather = {};
-    weather.battery = g_battery_val;
-    weather.temperature = map_value<float>(g_temperature, -50.f, 100.f, 0, 65535);
-    weather.pressure = map_value<float>(g_pressure, 500.f, 1500.f, 0, 65535);
-    weather.humidity = g_humidity * 255;
-
-    // checksum
-    data[num_bytes - 1] = crc8(data, sizeof(weather_t));
-
-    // send a message to the lora mesh-server
-    if(m_rfm95.manager->sendtoWait(data, num_bytes, RH_BROADCAST_ADDRESS))
+    struct checksum_helper_t
     {
-        // the message has been reliably delivered to the next node.
-        ret = true;
-    }
-    return ret;
+        uint8_t from, to;
+        T data;
+        uint8_t checksum;
+    };
+    checksum_helper_t foo;
+
+    foo.from = g_lora_config.address;
+    foo.to = RH_BROADCAST_ADDRESS;
+    foo.data = data;
+
+    // checksum TODO: include address
+    foo.checksum = crc8((uint8_t*)&foo.data, sizeof(T));
+
+    // send a broadcast-message
+    return m_rfm95.manager->sendto((uint8_t*)&foo.data, num_bytes, RH_BROADCAST_ADDRESS);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -160,16 +173,38 @@ void setup()
     // lora config
     set_address(g_lora_address);
 
-    g_timer[TIMER_LORA_SEND].set_callback([](){ lora_send_status(); });
+    g_timer[TIMER_LORA_SEND].set_callback([]()
+    {
+        // create a data-struct
+        gasman_t gasman = {};
+        gasman.battery = g_battery_val;
+        gasman.eco2 = map_value<float>(g_eco2, 400, 8192, 0, 65535);
+        gasman.tvoc = map_value<float>(g_tvoc, 0, 1187, 0, 65535);
+
+        // send it
+        lora_send_status(gasman);
+    });
     g_timer[TIMER_LORA_SEND].set_periodic();
     g_timer[TIMER_LORA_SEND].expires_from_now(g_lora_send_interval);
 
     // sensor setup
+    if(!g_ccs_sensor.begin())
+    {
+        Serial.println("failed to start sensor, check wiring ...");
+        while(true){ blink_status_led(); };
+    }
 
     // sensor measuring
     g_timer[TIMER_SENSOR_MEASURE].set_callback([]()
     {
+        if(g_ccs_sensor.available() && g_ccs_sensor.readData())
+        {
+            // read CO2
+            g_eco2 = g_ccs_sensor.geteCO2();
 
+            // read volatile organic compounds
+            g_tvoc = g_ccs_sensor.getTVOC();
+        }
     });
     g_timer[TIMER_SENSOR_MEASURE].set_periodic();
     g_timer[TIMER_SENSOR_MEASURE].expires_from_now(.04f);
