@@ -16,10 +16,8 @@ namespace lora{
 
 #if defined(ARDUINO_SAMD_ZERO) || defined(ARDUINO_FEATHER_M4)
 #define CS_PIN 6
-#define BATTERY_PIN A6
 #elif defined(ARDUINO_ITSYBITSY_M0) || defined(ARDUINO_ITSYBITSY_M4)
 #define CS_PIN 7
-#define BATTERY_PIN A7
 #endif
 
 struct config_t
@@ -62,7 +60,7 @@ enum NodeStructType
 struct driver_struct_t
 {
     RH_RF95 *driver = nullptr;
-    RHReliableDatagram *manager = nullptr;
+    RHDatagram *manager = nullptr;
 };
 
 static bool setup(const config_t &the_config, driver_struct_t &out_driver)
@@ -98,7 +96,7 @@ static bool setup(const config_t &the_config, driver_struct_t &out_driver)
     out_driver.driver->setCADTimeout(the_config.cad_timeout);
 
     // init manager
-    out_driver.manager = new RHReliableDatagram(*out_driver.driver, the_config.address);
+    out_driver.manager = new RHDatagram(*out_driver.driver, the_config.address);
     return out_driver.manager->init();
 }
 

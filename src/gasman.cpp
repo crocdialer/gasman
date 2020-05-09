@@ -33,7 +33,11 @@ enum TimerEnum
 kinski::Timer g_timer[NUM_TIMERS];
 
 // battery
-constexpr uint8_t g_battery_pin = BATTERY_PIN;
+#if defined(ARDUINO_SAMD_ZERO)
+constexpr uint8_t g_battery_pin = A7;
+#elif defined(ARDUINO_FEATHER_M4)
+constexpr uint8_t g_battery_pin = A6;
+#endif
 uint8_t g_battery_val = 0;
 
 // CCS811 Air Quality Sensor
@@ -102,7 +106,7 @@ void lora_receive()
     uint8_t from, to, msg_id, flags;
 
     // check for messages addressed to this node
-    if(m_rfm95.manager->recvfromAck(g_lora_buffer, &len, &from, &to, &msg_id, &flags))
+    if(m_rfm95.manager->recvfrom(g_lora_buffer, &len, &from, &to, &msg_id, &flags))
     {
         // received something
     }
