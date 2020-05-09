@@ -178,8 +178,11 @@ void setup()
         // create a data-struct
         gasman_t gasman = {};
         gasman.battery = g_battery_val;
-        gasman.eco2 = map_value<float>(g_eco2, 400, 8192, 0, 65535);
-        gasman.tvoc = map_value<float>(g_tvoc, 0, 1187, 0, 65535);
+        gasman.eco2 = g_eco2;
+        gasman.tvoc = g_tvoc;
+
+        // reset maximums
+        g_eco2 = g_tvoc = 0;
 
         // send it
         lora_send_status(gasman);
@@ -197,13 +200,19 @@ void setup()
     // sensor measuring
     g_timer[TIMER_SENSOR_MEASURE].set_callback([]()
     {
-        if(g_ccs_sensor.available() && g_ccs_sensor.readData())
+        if(g_ccs_sensor.available() && !g_ccs_sensor.readData())
         {
             // read CO2
-            g_eco2 = g_ccs_sensor.geteCO2();
+            uint16_t eco2 = g_ccs_sensor.geteCO2();
 
             // read volatile organic compounds
-            g_tvoc = g_ccs_sensor.getTVOC();
+            uint16_t tvoc = g_ccs_sensor.getTVOC();
+
+            // keep maximum
+            g_eco2 = max(g_eco2, eco2);
+            g_tvoc = max(g_tvoc, tvoc);
+
+            Serial.printf("eco2: %d ppm\ntvoc: %d\n", eco2, tvoc);
         }
     });
     g_timer[TIMER_SENSOR_MEASURE].set_periodic();
