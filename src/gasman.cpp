@@ -9,7 +9,7 @@
 // CCS811 Air Quality Sensor
 #include "Adafruit_CCS811.h"
 
-const uint8_t g_lora_address = 213;
+const uint8_t g_lora_address = 113;
 
 // analog-digital-converter (ADC)
 #define ADC_BITS 10
@@ -41,6 +41,7 @@ constexpr uint8_t g_battery_pin = A6;
 uint8_t g_battery_val = 0;
 
 // CCS811 Air Quality Sensor
+constexpr uint8_t g_ccs_i2c_adress = 0x5A; 
 Adafruit_CCS811 g_ccs_sensor;
 
 // eCO2 (equivalent calculated carbon-dioxide) concentration in range [400 .. 8192] parts per million (ppm)
@@ -78,7 +79,7 @@ lora::driver_struct_t m_rfm95 = {};
 //! lora message buffer
 uint8_t g_lora_buffer[RH_RF95_MAX_MESSAGE_LEN];
 
-float g_lora_send_interval = 2.f;
+float g_lora_send_interval = 5.f;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -161,7 +162,7 @@ void setup()
         float voltage = 3.3f * (float)raw_bat_measure * voltage_divider / (float)ADC_MAX;
         g_battery_val = static_cast<uint8_t>(map_value<float>(voltage, 3.6f, 4.2f, 0.f, 255.f));
         Serial.printf("battery-: %d%%\n", 100 * g_battery_val / 255);
-        // Serial.printf("raw_bat_measure: %d\n", raw_bat_measure);
+        Serial.printf("raw_bat_measure: %d\n", raw_bat_measure);
     });
     g_timer[TIMER_BATTERY_MEASURE].set_periodic();
     g_timer[TIMER_BATTERY_MEASURE].expires_from_now(10.f);
@@ -187,7 +188,7 @@ void setup()
     g_timer[TIMER_LORA_SEND].expires_from_now(g_lora_send_interval);
 
     // sensor setup
-    if(!g_ccs_sensor.begin())
+    if(!g_ccs_sensor.begin(g_ccs_i2c_adress))
     {
         Serial.println("failed to start sensor, check wiring ...");
         while(true){ blink_status_led(); };
@@ -212,7 +213,7 @@ void setup()
         }
     });
     g_timer[TIMER_SENSOR_MEASURE].set_periodic();
-    g_timer[TIMER_SENSOR_MEASURE].expires_from_now(.04f);
+    g_timer[TIMER_SENSOR_MEASURE].expires_from_now(.4f);
 
     digitalWrite(13, LOW);
 }
@@ -227,60 +228,4 @@ void loop()
 
     // poll Timer objects
     for(uint32_t i = 0; i < NUM_TIMERS; ++i){ g_timer[i].poll(); }
-}
-
-template <typename T> void process_input(T& the_device)
-{
-    uint16_t buf_idx = 0;
-
-    while(the_device.available())
-    {
-        // get the new byte:
-        char c = the_device.read();
-
-        switch(c)
-        {
-            case '\r':
-            case '\0':
-                continue;
-
-            case '\n':
-                g_serial_buf[buf_idx] = '\0';
-                buf_idx = 0;
-                parse_line(g_serial_buf);
-                break;
-
-            default:
-                g_serial_buf[buf_idx++] = c;
-                break;
-        }
-    }
-}
-
-bool check_for_cmd(const char* the_str)
-{
-    if(strcmp(the_str, CMD_QUERY_ID) == 0)
-    {
-        char buf[32];
-        sprintf(buf, "%s %s\n", the_str, DEVICE_ID);
-        Serial.print(buf);
-        return true;
-    }
-    return false;
-}
-
-void parse_line(char *the_line)
-{
-    const char* delim = " ";
-    const size_t elem_count = 3;
-    char *token = strtok(the_line, delim);
-    int num_buf[elem_count];
-    uint16_t i = 0;
-
-    for(; token && (i < elem_count); i++)
-    {
-        if(check_for_cmd(token)){ break; }
-        else{ num_buf[i] = atoi(token); }
-        token = strtok(nullptr, delim);
-    }
 }
